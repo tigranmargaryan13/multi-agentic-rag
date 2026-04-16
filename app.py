@@ -13,6 +13,7 @@ import time
 import uuid
 
 import streamlit as st
+from graph import GraphState
 
 # ── Page config (must be first Streamlit call) ────────────────────────────────
 st.set_page_config(
@@ -151,7 +152,6 @@ if st.session_state.pending_web:
         if c1.button("✅ Yes, search web", type="primary", use_container_width=True):
             with st.chat_message("assistant"):
                 with st.spinner("Searching the internet…"):
-                    from graph import GraphState
                     config  = {"configurable": {"thread_id": st.session_state.thread_id}}
                     initial: GraphState = {
                         "query": query, "sources": [], "agent_results": {},
@@ -182,8 +182,6 @@ if st.session_state.pending_web:
 
 # ── Chat input ────────────────────────────────────────────────────────────────
 if prompt := st.chat_input("Ask about ESG, IFRS, or competitor annual reports…"):
-    from graph import GraphState
-
     # Show user message immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):

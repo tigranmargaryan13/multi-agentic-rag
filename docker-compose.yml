@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./faiss_index:/app/faiss_index
+      - ./documents:/app/documents
+    restart: unless-stopped

@@ -26,10 +26,11 @@ from typing import Annotated, Dict, List, Optional, TypedDict
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from agents import create_rag_agent, create_source_classifier, create_web_agent
+from agents import AgentFactory
 from settings import BaseLLMSettings
 
 settings = BaseLLMSettings()
+_factory = AgentFactory()   # single shared instance — LLM clients and FAISS indexes cached here
 
 # ──────────────────────────────────────────────────────────────────────────────
 # State
@@ -53,33 +54,21 @@ class GraphState(TypedDict):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Lazy-loaded singletons
+# Agent accessors (thin wrappers — caching lives inside AgentFactory)
 # ──────────────────────────────────────────────────────────────────────────────
-
-_classifier = None
-_rag_agents: Dict[str, object] = {}
-_web_agent = None
-
-def _get_classifier():
-    global _classifier
-    if _classifier is None:
-        _classifier = create_source_classifier()
-    return _classifier
 
 def _index_exists(source: str) -> bool:
     from pathlib import Path
     return (Path(settings.FAISS_INDEX_DIR) / source / "index.faiss").exists()
 
+def _get_classifier():
+    return _factory.get_classifier()
+
 def _get_rag_agent(source: str):
-    if source not in _rag_agents:
-        _rag_agents[source] = create_rag_agent(source)
-    return _rag_agents[source]
+    return _factory.get_rag_agent(source)
 
 def _get_web_agent():
-    global _web_agent
-    if _web_agent is None:
-        _web_agent = create_web_agent()
-    return _web_agent
+    return _factory.get_web_agent()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -198,8 +187,7 @@ def synthesize_node(state: GraphState) -> dict:
         "5. Ends with one specific follow-up question.\n\n"
         "Final Answer:"
     )
-    llm = ChatOpenAI(model=settings.LLM_MODEL_NAME, temperature=settings.LLM_TEMPERATURE, api_key=settings.OPENAI_API_KEY)
-    answer = llm.invoke(prompt).content
+    answer = _factory.llm.invoke(prompt).content
 
     # Append this turn to chat_history so future turns have context
     updated_history = list(history) + [

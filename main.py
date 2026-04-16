@@ -43,6 +43,7 @@ def run_chat():
     main_graph = build_graph()
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
+    chat_history: list = []   # persisted across every turn in the session
 
     print("\n" + "═" * 72)
     print("  Financial Knowledge Assistant  (Multi-Agentic RAG)")
@@ -70,9 +71,11 @@ def run_chat():
             "clarification_question": None,
             "web_permission_required": False,
             "web_approved": False,
+            "chat_history": chat_history,
         }
 
         result = main_graph.invoke(initial_state, config=config)
+        chat_history = result.get("chat_history", chat_history)
 
         # ── Step 2: handle clarification ──────────────────────────────────────
         if result.get("needs_clarification"):
@@ -81,12 +84,13 @@ def run_chat():
             clarification = ask("\nYou (clarification): ")
             if not clarification:
                 continue
-            # Re-invoke with the combined query
+            # Re-invoke with the combined query and current history
             query = f"{query} — {clarification}"
             result = main_graph.invoke(
-                {**initial_state, "query": query},
+                {**initial_state, "query": query, "chat_history": chat_history},
                 config=config,
             )
+            chat_history = result.get("chat_history", chat_history)
 
         # ── Step 3: handle web fallback ───────────────────────────────────────
         if result.get("web_permission_required"):
@@ -97,9 +101,11 @@ def run_chat():
             approval = ask("\nYou: ").lower()
             if approval in {"yes", "y"}:
                 result = main_graph.invoke(
-                    {**initial_state, "query": query, "web_approved": True},
+                    {**initial_state, "query": query, "web_approved": True,
+                     "chat_history": chat_history},
                     config=config,
                 )
+                chat_history = result.get("chat_history", chat_history)
             else:
                 print("\nAssistant: Understood. Please try rephrasing your question.")
                 print_separator()
@@ -120,12 +126,13 @@ def run_chat():
         )
         feedback = ask("\nYou: ")
         if feedback and feedback.lower() not in {"no", "n", "quit", "exit"}:
-            # Treat feedback as a follow-up question
+            # Treat feedback as a follow-up question, carrying history forward
             query = feedback
             follow_up_result = main_graph.invoke(
-                {**initial_state, "query": query},
+                {**initial_state, "query": query, "chat_history": chat_history},
                 config=config,
             )
+            chat_history = follow_up_result.get("chat_history", chat_history)
             print_separator()
             follow_answer = follow_up_result.get("final_answer", "")
             if follow_answer:
@@ -140,8 +147,8 @@ def run_chat():
 
 if __name__ == "__main__":
     if "--ingest" in sys.argv:
-        from ingest import ingest
+        from build_index import DocumentIndexer
         print("Running document ingestion …\n")
-        ingest()
+        DocumentIndexer().build_index()
         print()
     run_chat()

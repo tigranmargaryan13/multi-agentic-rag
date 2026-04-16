@@ -13,3 +13,4 @@ pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 nest-asyncio>=1.6.0
 streamlit>=1.35.0
+pydantic_settings
