@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
+from prompts import AGENT_SYSTEM_PROMPTS, CLASSIFIER_PROMPT, WEB_AGENT_PROMPT
 from settings import BaseLLMSettings
 
 
@@ -66,57 +67,6 @@ class AgentFactory:
         ),
     }
 
-    # ── Classifier prompt ─────────────────────────────────────────────────────
-    _CLASSIFIER_PROMPT = """You are a query router for a financial firm's knowledge base.
-
-Available data sources:
-- esg: {esg}
-- ifrs: {ifrs}
-- competitor: {competitor}
-
-Analyse the user query and return:
-1. sources – a list of relevant source keys (can be multiple, or empty if none apply).
-2. is_ambiguous – True if the query needs clarification before answering.
-3. clarification_question – a short question to resolve the ambiguity (or null).
-
-User query: {query}"""
-
-    # ── RAG agent prompts ─────────────────────────────────────────────────────
-    _MULTIMODAL_NOTE = (
-        "Documents were ingested with multimodal extraction:\n"
-        "  • [TABLE] … [/TABLE]  blocks contain structured table data.\n"
-        "  • [Visual Content] blocks contain GPT-4 Vision descriptions of\n"
-        "    charts, diagrams, flowcharts, and figures.\n"
-        "Incorporate table and visual content into your answer as you would plain text.\n"
-    )
-
-    _AGENT_SYSTEM_PROMPTS = {
-        "esg": (
-            "You are an ESG expert specialising in GHG Protocol standards and climate accounting.\n"
-            + _MULTIMODAL_NOTE
-            + "Use the search_documents tool to retrieve relevant passages from the ESG document library.\n"
-            "Cite the document filename and page number for every claim you make.\n"
-            "Reproduce tables or visual data when they support your answer.\n"
-            "End your answer with one specific follow-up question the user might want to explore next."
-        ),
-        "ifrs": (
-            "You are an IFRS accounting standards expert.\n"
-            + _MULTIMODAL_NOTE
-            + "Use the search_documents tool to retrieve relevant passages from the IFRS document library.\n"
-            "Cite the standard name and paragraph number for every claim you make.\n"
-            "Reproduce tables or visual data when they support your answer.\n"
-            "End your answer with one specific follow-up question the user might want to explore next."
-        ),
-        "competitor": (
-            "You are a financial analyst specialising in competitive intelligence.\n"
-            + _MULTIMODAL_NOTE
-            + "Use the search_documents tool to retrieve relevant passages from competitor annual reports.\n"
-            "Cite the company name, report year, and section for every claim you make.\n"
-            "Reproduce financial tables or visual data when they support your answer.\n"
-            "End your answer with one specific follow-up question the user might want to explore next."
-        ),
-    }
-
     def __init__(self) -> None:
         s = BaseLLMSettings()
         self._settings = s
@@ -142,7 +92,7 @@ User query: {query}"""
             structured_llm = self.llm.with_structured_output(SourceClassification)
 
             def classify(query: str) -> SourceClassification:
-                prompt = self._CLASSIFIER_PROMPT.format(
+                prompt = CLASSIFIER_PROMPT.format(
                     esg=self.SOURCE_DESCRIPTIONS["esg"],
                     ifrs=self.SOURCE_DESCRIPTIONS["ifrs"],
                     competitor=self.SOURCE_DESCRIPTIONS["competitor"],
@@ -185,7 +135,7 @@ User query: {query}"""
             self._rag_agents[source_name] = create_react_agent(
                 self.llm,
                 tools=[search_documents],
-                prompt=self._AGENT_SYSTEM_PROMPTS[source_name],
+                prompt=AGENT_SYSTEM_PROMPTS[source_name],
             )
         return self._rag_agents[source_name]
 
@@ -202,11 +152,6 @@ User query: {query}"""
             self._web_agent = create_react_agent(
                 self.llm,
                 tools=[web_search],
-                prompt=(
-                    "You are a research assistant with internet access.\n"
-                    "Use the web_search tool to find accurate, up-to-date information.\n"
-                    "Always cite the source URLs you used.\n"
-                    "End your answer with one specific follow-up question."
-                ),
+                prompt=WEB_AGENT_PROMPT,
             )
         return self._web_agent

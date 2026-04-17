@@ -84,7 +84,7 @@ with st.sidebar:
 | | Source | Content |
 |---|---|---|
 | 📊 | **ESG** | GHG Protocol Standards |
-| 📋 | **IFRS** | IFRS 18 — Financial Statements |
+| 📋 | **IFRS** | IFRS — Financial Statements |
 | 🏢 | **Competitor** | Pfizer Annual Report |
 | 🌐 | **Web** | DuckDuckGo *(on request)* |
 """)
@@ -94,7 +94,7 @@ with st.sidebar:
     st.markdown("### 🔀 Agent Architecture")
     try:
         img = main_graph.get_graph().draw_mermaid_png()
-        st.image(img, use_container_width=True)
+        st.image(img, width="stretch")
     except Exception:
         st.code(
             "classify\n"
@@ -107,7 +107,7 @@ with st.sidebar:
     st.divider()
 
     col1, col2 = st.columns(2)
-    if col1.button("🔄 New chat", use_container_width=True):
+    if col1.button("🔄 New chat", width="stretch"):
         st.session_state.messages     = []
         st.session_state.thread_id    = str(uuid.uuid4())
         st.session_state.pending_web  = None
@@ -117,14 +117,29 @@ with st.sidebar:
     st.caption(f"Thread `{st.session_state.thread_id[:8]}…`")
 
     with st.expander("💡 Sample queries"):
-        st.markdown("""
-- What are the key changes in IFRS 18?
-- How do I calculate Scope 2 GHG emissions?
-- How does Pfizer report ESG in its annual report?
-- What ESG disclosures are required under IFRS?
-- Tell me about standards. *(triggers clarification)*
-- What's Pfizer's current stock price? *(triggers web fallback)*
-""")
+        SAMPLE_QUERIES = [
+            ("How should a company calculate Scope 3 emissions from purchased goods and services?", ["esg"]),
+            ("How does Pfizer report Scope 1 and 2 emissions and does it align with GHG Protocol?",  ["esg", "competitor"]),
+            ("How should ESG liabilities be presented under IFRS, and what does Pfizer actually disclose?", ["ifrs", "competitor"]),
+            ("Tell me the current price of AAPL stock?", ["web"]),
+            ("What are the disclosure requirements for operating segments under IFRS 8 Operating Segments?",           ["ifrs"]),
+            ("Tell me about the standards...", ["clarification"])
+        ]
+
+        SOURCE_BADGE_MINI = {
+            "esg":           "🟢 ESG",
+            "ifrs":          "🔵 IFRS",
+            "competitor":    "🟡 Competitor",
+            "web":           "🟣 Web",
+            "clarification": "❓ Clarify",
+        }
+
+        for question, sources in SAMPLE_QUERIES:
+            badge_str = " · ".join(SOURCE_BADGE_MINI[s] for s in sources)
+            if st.button(f"{question}", key=f"sample_{question[:30]}", width="stretch"):
+                st.session_state["prefill_query"] = question
+                st.rerun()
+            st.caption(badge_str)
 
 
 # ── Main area ─────────────────────────────────────────────────────────────────
@@ -149,7 +164,7 @@ if st.session_state.pending_web:
         )
         st.markdown("Would you like me to search the internet?")
         c1, c2, _ = st.columns([1, 1, 3])
-        if c1.button("✅ Yes, search web", type="primary", use_container_width=True):
+        if c1.button("✅ Yes, search web", type="primary", width="stretch"):
             with st.chat_message("assistant"):
                 with st.spinner("Searching the internet…"):
                     config  = {"configurable": {"thread_id": st.session_state.thread_id}}
@@ -172,7 +187,7 @@ if st.session_state.pending_web:
             st.session_state.pending_web = None
             st.rerun()
 
-        if c2.button("❌ Skip", use_container_width=True):
+        if c2.button("❌ Skip", width="stretch"):
             reply = ("Understood. Please try rephrasing or ask about "
                      "ESG, IFRS standards, or competitor reports.")
             st.session_state.messages.append({"role": "assistant", "content": reply})
@@ -181,7 +196,8 @@ if st.session_state.pending_web:
 
 
 # ── Chat input ────────────────────────────────────────────────────────────────
-if prompt := st.chat_input("Ask about ESG, IFRS, or competitor annual reports…"):
+_prefill = st.session_state.pop("prefill_query", None)
+if prompt := (st.chat_input("Ask about ESG, IFRS, or competitor annual reports…") or _prefill):
     # Show user message immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -196,57 +212,67 @@ if prompt := st.chat_input("Ask about ESG, IFRS, or competitor annual reports…
     }
 
     with st.chat_message("assistant"):
-        # Live progress via LangGraph streaming
+        progress_ph = st.empty()   # status / progress widget
+        answer_ph   = st.empty()   # streaming answer (rendered below progress)
+
         sources_found: list[str] = []
-        accumulated_agent_results: dict = {}
         final_answer = ""
+        streamed_text = ""
         needs_clarification = False
         clarification_question = None
         web_permission_required = False
 
         t0 = time.time()
 
-        with st.status("Processing…", expanded=True) as status:
-            for update in main_graph.stream(initial, config=config, stream_mode="updates"):
-                node = next(iter(update))
-                data = update[node] or {}
+        with progress_ph.status("Processing…", expanded=True) as status:
+            for mode, payload in main_graph.stream(
+                initial, config=config, stream_mode=["updates", "messages"]
+            ):
+                # ── Progress updates ──────────────────────────────────────────
+                if mode == "updates":
+                    node = next(iter(payload))
+                    data = payload[node] or {}
 
-                if node == "classify":
-                    sources_found          = data.get("sources", [])
-                    needs_clarification    = data.get("needs_clarification", False)
-                    clarification_question = data.get("clarification_question")
+                    if node == "classify":
+                        sources_found          = data.get("sources", [])
+                        needs_clarification    = data.get("needs_clarification", False)
+                        clarification_question = data.get("clarification_question")
 
-                    if needs_clarification:
-                        st.write("❓ Query is ambiguous — asking for clarification")
-                    elif web_permission_required:
-                        st.write("🌐 No matching internal sources — web search available")
-                    elif sources_found:
-                        labels = " · ".join(
-                            f"{SOURCE_ICONS.get(s,'')} **{SOURCE_LABELS.get(s,s.upper())}**"
-                            for s in sources_found
-                        )
-                        st.write(f"🔍 Sources detected: {labels}")
-                        st.write("🤖 Agents running in parallel…")
-                    else:
-                        st.write("⚠️ No matching sources found")
+                        if needs_clarification:
+                            st.write("❓ Query is ambiguous — asking for clarification")
+                        elif sources_found:
+                            labels = " · ".join(
+                                f"{SOURCE_ICONS.get(s,'')} **{SOURCE_LABELS.get(s,s.upper())}**"
+                                for s in sources_found
+                            )
+                            st.write(f"🔍 Sources detected: {labels}")
+                            st.write("🤖 Agents running in parallel…")
+                        else:
+                            st.write("⚠️ No matching sources found")
 
-                elif node in ("esg_agent", "ifrs_agent", "competitor_agent"):
-                    src = node.replace("_agent", "")
-                    agent_res = data.get("agent_results", {}) if data else {}
-                    if agent_res:
-                        accumulated_agent_results.update(agent_res)
-                        st.write(
-                            f"✅ {SOURCE_ICONS.get(src,'')} "
-                            f"**{SOURCE_LABELS.get(src, src.upper())}** agent — complete"
-                        )
-                    # else: agent skipped (source not selected)
+                    elif node in ("esg_agent", "ifrs_agent", "competitor_agent"):
+                        src = node.replace("_agent", "")
+                        agent_res = data.get("agent_results", {}) if data else {}
+                        if agent_res:
+                            st.write(
+                                f"✅ {SOURCE_ICONS.get(src,'')} "
+                                f"**{SOURCE_LABELS.get(src, src.upper())}** agent — complete"
+                            )
 
-                elif node == "synthesize":
-                    if data:
+                    elif node == "synthesize" and data:
                         final_answer            = data.get("final_answer", "")
                         web_permission_required = data.get("web_permission_required", False)
-                        if final_answer:
-                            st.write("📝 Synthesising final answer…")
+
+                # ── Token streaming from synthesize ───────────────────────────
+                elif mode == "messages":
+                    chunk, metadata = payload
+                    if (
+                        metadata.get("langgraph_node") == "synthesize"
+                        and hasattr(chunk, "content")
+                        and chunk.content
+                    ):
+                        streamed_text += chunk.content
+                        answer_ph.markdown(streamed_text + "▌")   # ▌ = live cursor
 
             elapsed = time.time() - t0
             status.update(
@@ -255,16 +281,18 @@ if prompt := st.chat_input("Ask about ESG, IFRS, or competitor annual reports…
                 expanded=False,
             )
 
+        # ── Finalise answer placeholder (remove cursor) ───────────────────────
+        display = streamed_text or final_answer
+        if display:
+            answer_ph.markdown(display)
+
         # ── Render result ─────────────────────────────────────────────────────
         if needs_clarification and clarification_question:
-            st.info(f"**Clarification needed**\n\n{clarification_question}")
+            answer_ph.info(f"**Clarification needed**\n\n{clarification_question}")
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": f"**Clarification needed**\n\n{clarification_question}",
             })
-            # Store the clarification exchange in history so the follow-up
-            # answer ("yes, his business activities") has enough context to
-            # resolve pronouns and topic references correctly.
             st.session_state.chat_history = [
                 *st.session_state.chat_history,
                 {"role": "user",      "content": prompt},
@@ -272,26 +300,25 @@ if prompt := st.chat_input("Ask about ESG, IFRS, or competitor annual reports…
             ]
 
         elif web_permission_required:
+            answer_ph.empty()
             st.session_state.pending_web = prompt
             st.rerun()
 
-        elif final_answer:
-            st.markdown(final_answer)
+        elif display:
             if sources_found:
                 st.markdown(source_badges(sources_found), unsafe_allow_html=True)
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": final_answer,
+                "content": display,
                 "sources": sources_found,
             })
-            # Persist conversation history for the next turn
             st.session_state.chat_history = [
                 *st.session_state.chat_history,
                 {"role": "user",      "content": prompt},
-                {"role": "assistant", "content": final_answer},
+                {"role": "assistant", "content": display},
             ]
 
         else:
             fallback = "I could not find relevant information for your query."
-            st.markdown(fallback)
+            answer_ph.markdown(fallback)
             st.session_state.messages.append({"role": "assistant", "content": fallback})
