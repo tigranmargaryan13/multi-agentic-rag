@@ -67,10 +67,11 @@ def load_graph():
 main_graph = load_graph()
 
 # ── Session state defaults ────────────────────────────────────────────────────
-if "messages"      not in st.session_state: st.session_state.messages      = []
-if "thread_id"     not in st.session_state: st.session_state.thread_id     = str(uuid.uuid4())
-if "pending_web"   not in st.session_state: st.session_state.pending_web   = None
-if "chat_history"  not in st.session_state: st.session_state.chat_history  = []
+if "messages"        not in st.session_state: st.session_state.messages        = []
+if "thread_id"       not in st.session_state: st.session_state.thread_id       = str(uuid.uuid4())
+if "pending_web"     not in st.session_state: st.session_state.pending_web     = None
+if "pending_feedback" not in st.session_state: st.session_state.pending_feedback = False
+if "chat_history"    not in st.session_state: st.session_state.chat_history    = []
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -108,10 +109,11 @@ with st.sidebar:
 
     col1, col2 = st.columns(2)
     if col1.button("🔄 New chat", width="stretch"):
-        st.session_state.messages     = []
-        st.session_state.thread_id    = str(uuid.uuid4())
-        st.session_state.pending_web  = None
-        st.session_state.chat_history = []
+        st.session_state.messages         = []
+        st.session_state.thread_id        = str(uuid.uuid4())
+        st.session_state.pending_web      = None
+        st.session_state.pending_feedback = False
+        st.session_state.chat_history     = []
         st.rerun()
 
     st.caption(f"Thread `{st.session_state.thread_id[:8]}…`")
@@ -195,9 +197,23 @@ if st.session_state.pending_web:
             st.rerun()
 
 
+# ── Feedback prompt ───────────────────────────────────────────────────────────
+if st.session_state.pending_feedback:
+    with st.container(border=True):
+        st.markdown("### 💬 Was this answer helpful?")
+        st.markdown(
+            "Would you like me to explore other data sources?  \n"
+            "Type a follow-up question in the chat box below, or click **Done** to continue."
+        )
+        if st.button("✅ Done, thanks!", type="primary"):
+            st.session_state.pending_feedback = False
+            st.rerun()
+
+
 # ── Chat input ────────────────────────────────────────────────────────────────
 _prefill = st.session_state.pop("prefill_query", None)
 if prompt := (st.chat_input("Ask about ESG, IFRS, or competitor annual reports…") or _prefill):
+    st.session_state.pending_feedback = False
     # Show user message immediately
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -317,6 +333,8 @@ if prompt := (st.chat_input("Ask about ESG, IFRS, or competitor annual reports�
                 {"role": "user",      "content": prompt},
                 {"role": "assistant", "content": display},
             ]
+            st.session_state.pending_feedback = True
+            st.rerun()
 
         else:
             fallback = "I could not find relevant information for your query."
